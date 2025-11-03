@@ -1,0 +1,195 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String?
+  shopifyDomain     String?
+  shopifyAccessToken String?
+  stripeCustomerId  String?   @unique
+  subscriptionId    String?   @unique
+  subscriptionStatus String   @default("inactive")
+  plan              String    @default("basic")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  lastLoginAt       DateTime?
+  
+  // Relations
+  products          Product[]
+  descriptions      Description[]
+  jobs              Job[]
+  analytics         Analytics[]
+  subscriptions     Subscription[]
+  
+  @@map("users")
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  userId          String
+  shopifyProductId String  @unique
+  title           String
+  description     String?
+  vendor          String?
+  productType     String?
+  tags            String[]
+  images          String[]
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  descriptions    Description[]
+  analytics       Analytics[]
+  
+  @@map("products")
+}
+
+model Description {
+  id              String    @id @default(cuid())
+  userId          String
+  productId       String
+  content         String
+  originalContent String?
+  keywords        String[]
+  tone            String    @default("professional")
+  language        String    @default("en")
+  wordCount       Int
+  seoScore        Float?
+  aiModel         String    @default("gpt-4")
+  generationCost  Float?
+  status          String    @default("pending")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@map("descriptions")
+}
+
+model Job {
+  id              String    @id @default(cuid())
+  userId          String
+  type            String    // bulk_generation, single_generation, seo_optimization
+  status          String    @default("pending") // pending, processing, completed, failed
+  totalProducts   Int
+  processedProducts Int     @default(0)
+  successfulProducts Int   @default(0)
+  failedProducts  Int       @default(0)
+  config          Json?     // Job configuration
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("jobs")
+}
+
+model Analytics {
+  id              String    @id @default(cuid())
+  userId          String
+  productId       String?
+  date            DateTime  @db.Date
+  descriptionsGenerated Int  @default(0)
+  descriptionsUpdated   Int  @default(0)
+  apiCalls        Int       @default(0)
+  cost            Float     @default(0)
+  revenue         Float     @default(0)
+  conversionRate  Float?
+  avgSeoScore     Float?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product         Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  
+  @@unique([userId, date])
+  @@map("analytics")
+}
+
+model Subscription {
+  id              String    @id @default(cuid())
+  userId          String
+  stripeSubscriptionId String @unique
+  plan            String    // basic, pro, enterprise
+  status          String    // active, canceled, past_due, trialing
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("subscriptions")
+}
+
+model ApiKey {
+  id              String    @id @default(cuid())
+  key             String    @unique
+  name            String
+  userId          String
+  permissions     String[]
+  rateLimit       Int       @default(1000) // requests per hour
+  lastUsed        DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@map("api_keys")
+}
+
+model Notification {
+  id              String    @id @default(cuid())
+  userId          String
+  type            String    // job_completed, billing_alert, security_alert
+  title           String
+  message         String
+  read            Boolean   @default(false)
+  data            Json?
+  createdAt       DateTime  @default(now())
+  
+  @@map("notifications")
+}
+
+model WebhookLog {
+  id              String    @id @default(cuid())
+  source          String    // shopify, stripe, openai
+  eventType       String
+  payload         Json
+  processed       Boolean   @default(false)
+  error           String?
+  createdAt       DateTime  @default(now())
+  
+  @@map("webhook_logs")
+}
+
+model Setting {
+  id              String    @id @default(cuid())
+  key             String    @unique
+  value           Json
+  type            String    @default("global") // global, user, plan
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@map("settings")
+}

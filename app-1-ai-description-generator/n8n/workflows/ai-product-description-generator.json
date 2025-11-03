@@ -1,0 +1,355 @@
+{
+  "name": "AI Product Description Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook",
+        "options": {}
+      },
+      "id": "c1e7e9f8-8b1a-4e5f-9c3d-1a2b3c4d5e6f",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "product-description-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "resource": "product",
+        "filters": {
+          "limit": 100
+        },
+        "options": {}
+      },
+      "id": "a2f8e0f9-9c2b-5f6a-0d4e-2b3c4d5e6f7a",
+      "name": "Get Shopify Products",
+      "type": "n8n-nodes-base.shopify",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "credentials": {
+        "shopifyApi": {
+          "id": "shopify-credentials",
+          "name": "Shopify API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process each product for description generation\nconst products = items[0].json.products || [];\nconst generatedDescriptions = [];\n\nfor (const product of products) {\n  // Skip products that already have descriptions\n  if (product.body_html && product.body_html.trim().length > 50) {\n    continue;\n  }\n\n  const descriptionData = {\n    productId: product.id,\n    title: product.title,\n    vendor: product.vendor,\n    productType: product.product_type,\n    tags: product.tags ? product.tags.split(', ') : [],\n    images: product.images.map(img => img.src),\n    existingDescription: product.body_html\n  };\n\n  generatedDescriptions.push(descriptionData);\n}\n\nreturn generatedDescriptions.map(desc => ({\n  json: desc\n}));"
+      },
+      "id": "b3f9f1a0-0d3c-6g7b-1e5f-3c4d5e6f7g8h",
+      "name": "Process Products",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert e-commerce copywriter specializing in creating compelling, SEO-optimized product descriptions that convert browsers into buyers.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": `Create a compelling product description for: ${$json.title}. Vendor: ${$json.vendor || 'Unknown'}. Type: ${$json.productType || 'Not specified'}. Tags: ${$json.tags.join(', ') || 'None'}. Write in a professional tone with 150-200 words. Include key features and customer benefits. Optimize for SEO with natural keyword integration.`\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 500\n}",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 3
+          }
+        }
+      },
+      "id": "c4g0g2b1-1e4d-7h8c-2f6g-4d5e6f7g8h9i",
+      "name": "Generate with OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse OpenAI response and prepare update data\nconst aiResponse = items[0].json.choices[0].message.content;\nconst originalItem = items[0].json.original || {};\n\n// Extract the description (remove any markdown formatting)\nlet description = aiResponse.replace(/\\*\\*(.*?)\\*\\*/g, '$1').trim();\n\n// Calculate word count\nconst wordCount = description.split(/\\s+/).length;\n\n// Estimate SEO score based on length and structure\nlet seoScore = 70; // Base score\nif (wordCount > 100 && wordCount < 300) seoScore += 15;\nif (description.includes('Keywords:') || description.includes('keywords')) seoScore += 10;\nif (description.length > 200) seoScore += 5;\n\nconst updateData = {\n  productId: originalItem.productId,\n  title: originalItem.title,\n  body_html: description,\n  seoScore: Math.min(seoScore, 100),\n  wordCount,\n  generatedAt: new Date().toISOString(),\n  aiModel: 'gpt-4'\n};\n\nreturn [{ json: updateData }];"
+      },
+      "id": "d5h1h3c2-2f5e-8i9d-3g7h-5e6f7g8h9i0j",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "resource": "product",
+        "productId": "={{ $json.productId }}",
+        "updateFields": {
+          "body_html": "={{ $json.body_html }}"
+        },
+        "options": {}
+      },
+      "id": "e6i2i4d3-3g6f-9j0e-4h8i-6f7g7h8i9j0k1l",
+      "name": "Update Shopify Product",
+      "type": "n8n-nodes-base.shopify",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "credentials": {
+        "shopifyApi": {
+          "id": "shopify-credentials",
+          "name": "Shopify API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body_html }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "f7j3j5e4-4h7g-0k1f-5i9j-7g8h8i9j0k1l2m",
+      "name": "Success Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "to": "={{ $workflow.webhook.url }}",
+        "subject": "✅ AI Description Generated Successfully",
+        "text": "Product description generated and updated successfully:\\n\\nProduct: {{ $json.title }}\\nSEO Score: {{ $json.seoScore }}/100\\nWord Count: {{ $json.wordCount }}\\nGenerated: {{ $json.generatedAt }}\\n\\nShopify URL: https://{{ $workflow.shopDomain }}/admin/products/{{ $json.productId }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "id": "g8k4k6f5-5i8h-1l2g-6j0k-8h9i9j0k1l2m3n",
+      "name": "Success Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1600, 200],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "to": "={{ $workflow.webhook.url }}",
+        "subject": "❌ AI Description Generation Failed",
+        "text": "Failed to generate product description:\\n\\nProduct: {{ $('Process Products').item.json.title }}\\nError: {{ $json.error || 'Unknown error' }}\\nTimestamp: {{ new Date().toISOString() }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "id": "h9l5l7g6-6j9i-2m3h-7k1l-9i0j0k1l2m3n4o",
+      "name": "Error Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1600, 400],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $workflow.webhook.url }}",
+        "jsonBody": "={\n  \"status\": \"completed\",\n  \"processed\": {{ $json.processed || 0 }},\n  \"successful\": {{ $json.successful || 0 }},\n  \"failed\": {{ $json.failed || 0 }},\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "i0m6m8h7-7k0j-3n4i-8l2m-0j1k1l2m3n4o5p",
+      "name": "Status Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.error }}",
+              "operation": "isEmpty"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "j1n7n9i8-8l1k-4o5j-9m3n-1k2l2m3n4o5p6q",
+      "name": "Error Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1200, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Shopify Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Shopify Products": {
+      "main": [
+        [
+          {
+            "node": "Process Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Products": {
+      "main": [
+        [
+          {
+            "node": "Generate with OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate with OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Update Shopify Product",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Shopify Product": {
+      "main": [
+        [
+          {
+            "node": "Success Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Error Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success Check": {
+      "main": [
+        [
+          {
+            "node": "Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Error Filter": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success Notification": {
+      "main": [
+        [
+          {
+            "node": "Status Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Notification": {
+      "main": [
+        [
+          {
+            "node": "Status Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Webhook": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "createdAt": "2025-01-01T00:00:00.000Z",
+  "id": "ai-product-description-generator",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "automation",
+      "name": "Automation"
+    },
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "shopify",
+      "name": "Shopify"
+    },
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "ai",
+      "name": "AI"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
